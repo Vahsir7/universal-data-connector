@@ -1,6 +1,7 @@
+from typing import Dict, List
 
-from typing import List, Dict
 from app.config import settings
 
-def apply_voice_limits(data: List[Dict]) -> List[Dict]:
-    return data[:settings.MAX_RESULTS]
+def apply_voice_limits(data: List[Dict], limit: int = settings.MAX_RESULTS) -> List[Dict]:
+    effective_limit = min(limit, settings.MAX_RESULTS)
+    return data[:effective_limit]
