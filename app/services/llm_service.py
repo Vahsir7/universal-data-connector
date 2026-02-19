@@ -12,7 +12,9 @@ from app.models.assistant import (
     ToolFetchDataArgs,
 )
 from app.models.common import DataResponse
+from app.services.cache import build_assistant_cache_key, cache_service
 from app.services.data_service import DataSource, get_unified_data
+from app.services.llm_api_keys import llm_api_key_service
 
 
 SYSTEM_PROMPT = (
@@ -417,12 +419,12 @@ def _recover_tool_call_from_text_response(
     )
 
 
-def _run_openai(request: AssistantQueryRequest) -> AssistantQueryResponse:
-    if not _secret_is_configured(settings.OPENAI_API_KEY):
+def _run_openai(request: AssistantQueryRequest, api_key: str) -> AssistantQueryResponse:
+    if not api_key:
         raise ValueError("OPENAI_API_KEY is not configured")
 
     openai_module = importlib.import_module("openai")
-    client = openai_module.OpenAI(api_key=settings.OPENAI_API_KEY.get_secret_value())
+    client = openai_module.OpenAI(api_key=api_key)
     model_name = request.model or settings.OPENAI_MODEL
 
     messages: List[Dict[str, Any]] = [
@@ -513,13 +515,13 @@ def _run_openai(request: AssistantQueryRequest) -> AssistantQueryResponse:
     )
 
 
-def _run_gemini(request: AssistantQueryRequest) -> AssistantQueryResponse:
-    if not _secret_is_configured(settings.GEMINI_API_KEY):
+def _run_gemini(request: AssistantQueryRequest, api_key: str) -> AssistantQueryResponse:
+    if not api_key:
         raise ValueError("GEMINI_API_KEY is not configured")
 
     openai_module = importlib.import_module("openai")
     client = openai_module.OpenAI(
-        api_key=settings.GEMINI_API_KEY.get_secret_value(),
+        api_key=api_key,
         base_url=settings.GEMINI_BASE_URL,
     )
     model_name = request.model or settings.GEMINI_MODEL
@@ -629,12 +631,12 @@ def _extract_text_from_blocks(blocks: List[Any]) -> str:
     return "\n".join(block.text for block in blocks if getattr(block, "type", None) == "text")
 
 
-def _run_anthropic(request: AssistantQueryRequest) -> AssistantQueryResponse:
-    if not _secret_is_configured(settings.ANTHROPIC_API_KEY):
+def _run_anthropic(request: AssistantQueryRequest, api_key: str) -> AssistantQueryResponse:
+    if not api_key:
         raise ValueError("ANTHROPIC_API_KEY is not configured ")
 
     anthropic_module = importlib.import_module("anthropic")
-    client = anthropic_module.Anthropic(api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
+    client = anthropic_module.Anthropic(api_key=api_key)
     model_name = request.model or settings.ANTHROPIC_MODEL
 
     first = client.messages.create(
@@ -715,25 +717,59 @@ def _run_anthropic(request: AssistantQueryRequest) -> AssistantQueryResponse:
 
 
 def run_assistant_query(request: AssistantQueryRequest) -> AssistantQueryResponse:
+    cache_key = build_assistant_cache_key(
+        {
+            "provider": request.provider.value,
+            "query": request.user_query,
+            "model": request.model,
+            "temperature": request.temperature,
+            "api_key_id": request.api_key_id,
+            "has_manual_api_key": bool(request.api_key),
+        }
+    )
+    cached = cache_service.get(cache_key)
+    if cached is not None:
+        return AssistantQueryResponse.model_validate(cached)
+
     daily_users_date = _detect_daily_users_date_query(request.user_query)
     if daily_users_date is not None:
-        return _run_daily_users_for_date_fallback(request, daily_users_date)
+        response = _run_daily_users_for_date_fallback(request, daily_users_date)
+        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
+        return response
 
     if _is_total_active_users_query(request.user_query):
-        return _run_total_active_users_fallback(request)
+        response = _run_total_active_users_fallback(request)
+        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
+        return response
 
     ticket_id = _detect_ticket_id_query(request.user_query)
     if ticket_id is not None:
-        return _run_ticket_lookup_fallback(request, ticket_id)
+        response = _run_ticket_lookup_fallback(request, ticket_id)
+        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
+        return response
 
     customer_id = _detect_customer_id_query(request.user_query)
     if customer_id is not None:
-        return _run_customer_lookup_fallback(request, customer_id)
+        response = _run_customer_lookup_fallback(request, customer_id)
+        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
+        return response
+
+    resolved_api_key = llm_api_key_service.resolve_key(
+        provider=request.provider,
+        api_key_id=request.api_key_id,
+        manual_api_key=request.api_key,
+    )
 
     if request.provider == LLMProvider.openai:
-        return _run_openai(request)
+        response = _run_openai(request, resolved_api_key)
+        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
+        return response
     if request.provider == LLMProvider.anthropic:
-        return _run_anthropic(request)
+        response = _run_anthropic(request, resolved_api_key)
+        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
+        return response
     if request.provider == LLMProvider.gemini:
-        return _run_gemini(request)
+        response = _run_gemini(request, resolved_api_key)
+        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
+        return response
     raise ValueError(f"Unsupported provider: {request.provider}")

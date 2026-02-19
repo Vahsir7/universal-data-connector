@@ -34,6 +34,8 @@ class AssistantQueryRequest(BaseModel):
     user_query: str = Field(..., min_length=1, description="Natural-language user query")
     model: Optional[str] = Field(default=None, description="Optional model override")
     temperature: float = Field(default=0.2, ge=0.0, le=1.0)
+    api_key_id: Optional[str] = Field(default=None, description="Stored provider API key identifier")
+    api_key: Optional[str] = Field(default=None, description="Manual provider API key for this request")
 
 
 class AssistantToolCall(BaseModel):

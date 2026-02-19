@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Universal Data Connector Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: #f3f4f6; color: #111827; }
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    .header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .header h2 { margin: 0; font-size: 20px; font-weight: 600; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a { text-decoration: none; border-radius: 8px; padding: 8px 12px; background: #e5e7eb; color: #111827; font-size: 13px; }
+    .nav a.active { background: #1f2937; color: #fff; }
+    .content { width: 100%; max-width: 1440px; margin: 0 auto; padding: 24px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    label { font-size: 12px; color: #4b5563; display: block; margin-bottom: 4px; }
+    input, select, button { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 14px; }
+    button { background: #374151; color: #fff; border: 0; cursor: pointer; }
+    button:hover { background: #1f2937; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .status { font-size: 12px; font-weight: 600; margin-top: 8px; }
+    .ok { color: #047857; } .warn { color: #b45309; } .err { color: #b91c1c; }
+    pre { background: #f9fafb; color: #111827; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; max-height: 380px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px; font-size: 13px; text-align: left; }
+    th { background: #f3f4f6; }
+    @media (max-width: 900px) {
+      .content { padding: 16px; }
+      .row2, .row3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h2>API Management</h2>
+    <div class="nav">
+      <a href="/home/llm">LLM</a>
+      <a href="/home/data">Data</a>
+      <a href="/home/api" class="active">API Management</a>
+    </div>
+  </div>
+
+  <main class="content">
+  <section class="card">
+    <div class="row3">
+      <div><label>Provider</label><select id="newKeyProvider"><option value="gemini">gemini</option><option value="openai">openai</option><option value="anthropic">anthropic</option></select></div>
+      <div><label>Key Name</label><input id="newKeyName" placeholder="e.g. primary-openai" /></div>
+      <div><label>Model</label><input id="newKeyModel" placeholder="e.g. gpt-4.1-mini" /></div>
+    </div>
+    <div style="margin-top:8px;"><label>Secret Key</label><input id="newKeyValue" type="password" placeholder="Paste provider secret key" /></div>
+    <div class="row2" style="margin-top:10px;">
+      <button onclick="createLlmKey()">Add API Key</button>
+      <button onclick="revokeSelectedLlmKey()">Revoke Selected Table Row</button>
+    </div>
+    <div id="keyStatus" class="status">Ready</div>
+  </section>
+
+  <section class="card">
+    <h3 style="margin-top:0;">Stored Provider Keys</h3>
+    <table>
+      <thead>
+      <tr>
+        <th>Select</th>
+        <th>Name</th>
+        <th>Provider</th>
+        <th>Model</th>
+        <th>Masked Key</th>
+        <th>Source</th>
+        <th>Revoked</th>
+      </tr>
+      </thead>
+      <tbody id="apiKeysTableBody"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h3 style="margin-top:0;">Response Log</h3>
+    <pre id="log">Ready</pre>
+  </section>
+  </main>
+</div>
+
+<script>
+const logEl = document.getElementById('log');
+let keyRecords = [];
+
+function setStatus(id, text, mode='ok') {
+  const el = document.getElementById(id);
+  el.className = `status ${mode}`;
+  el.textContent = text;
+}
+
+function log(data){
+  logEl.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
+
+function renderApiTable(){
+  const body = document.getElementById('apiKeysTableBody');
+  body.innerHTML = '';
+  keyRecords.forEach(record => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = [
+      `<td><input type="radio" name="selectedKeyRow" value="${record.key_id}" /></td>`,
+      `<td>${record.name || ''}</td>`,
+      `<td>${record.provider || ''}</td>`,
+      `<td>${record.model || ''}</td>`,
+      `<td>${record.api_key_masked || ''}</td>`,
+      `<td>${record.source || ''}</td>`,
+      `<td>${record.revoked ? 'yes' : 'no'}</td>`
+    ].join('');
+    body.appendChild(tr);
+  });
+}
+
+async function refreshLlmKeys(){
+  const res = await fetch('/assistant/api-keys');
+  if (!res.ok) return;
+  keyRecords = await res.json();
+  renderApiTable();
+}
+
+async function createLlmKey(){
+  const payload = {
+    provider: document.getElementById('newKeyProvider').value,
+    name: document.getElementById('newKeyName').value || 'manual-key',
+    model: document.getElementById('newKeyModel').value || null,
+    api_key: document.getElementById('newKeyValue').value,
+  };
+  const res = await fetch('/assistant/api-keys', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  log(data);
+  if (res.ok) {
+    document.getElementById('newKeyValue').value = '';
+    await refreshLlmKeys();
+  }
+  setStatus('keyStatus', res.ok ? 'API key added' : `Error ${res.status}`, res.ok ? 'ok' : 'err');
+}
+
+async function revokeSelectedLlmKey(){
+  const selected = document.querySelector('input[name="selectedKeyRow"]:checked');
+  if (!selected){
+    setStatus('keyStatus', 'Select a table row first', 'warn');
+    return;
+  }
+  const res = await fetch(`/assistant/api-keys/${encodeURIComponent(selected.value)}/revoke`, { method:'POST' });
+  const data = await res.json();
+  log(data);
+  await refreshLlmKeys();
+  setStatus('keyStatus', res.ok ? 'Key revoked' : `Error ${res.status}`, res.ok ? 'ok' : 'err');
+}
+
+refreshLlmKeys();
+</script>
+</body>
+</html>

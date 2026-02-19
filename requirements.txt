@@ -7,3 +7,5 @@ pytest
 httpx
 openai
 anthropic
+redis
+openpyxl

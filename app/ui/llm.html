@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Universal Data Connector Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: #f3f4f6; color: #111827; }
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    .header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .header h2 { margin: 0; font-size: 20px; font-weight: 600; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a { text-decoration: none; border-radius: 8px; padding: 8px 12px; background: #e5e7eb; color: #111827; font-size: 13px; }
+    .nav a.active { background: #1f2937; color: #fff; }
+    .content { width: 100%; max-width: 1440px; margin: 0 auto; padding: 24px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    label { font-size: 12px; color: #4b5563; display: block; margin-bottom: 4px; }
+    input, select, button { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 14px; }
+    button { background: #374151; color: #fff; border: 0; cursor: pointer; }
+    button:hover { background: #1f2937; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .status { font-size: 12px; font-weight: 600; margin-top: 8px; }
+    .ok { color: #047857; } .warn { color: #b45309; } .err { color: #b91c1c; }
+    pre { background: #f9fafb; color: #111827; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; max-height: 380px; overflow: auto; }
+    @media (max-width: 900px) {
+      .content { padding: 16px; }
+      .row2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h2>LLM Assistant</h2>
+    <div class="nav">
+      <a href="/home/llm" class="active">LLM</a>
+      <a href="/home/data">Data</a>
+      <a href="/home/api">API Management</a>
+    </div>
+  </div>
+
+  <main class="content">
+  <section class="card">
+    <div class="row2">
+      <div>
+        <label>Select API Key</label>
+        <select id="llmKeySelect"></select>
+      </div>
+      <div>
+        <label>Model</label>
+        <input id="selectedModel" readonly />
+      </div>
+    </div>
+    <div class="row2" style="margin-top:8px;">
+      <div><label>Prompt</label><input id="prompt" value="Show me ticket 48" /></div>
+      <div><label>Model Override (optional)</label><input id="assistantModel" placeholder="leave empty to use selected key model" /></div>
+    </div>
+    <button style="margin-top:10px;" onclick="runAssistant()">Run Assistant</button>
+    <button style="margin-top:10px;" onclick="exportAssistantCsv()">Export Answer CSV</button>
+    <div id="assistantStatus" class="status">Ready</div>
+  </section>
+
+  <section class="card">
+    <h3 style="margin-top:0;">Response Log</h3>
+    <pre id="log">Ready</pre>
+  </section>
+  </main>
+</div>
+
+<script>
+const logEl = document.getElementById('log');
+let lastAssistantResponse = null;
+let keyRecords = [];
+
+function setStatus(id, text, mode='ok') {
+  const el = document.getElementById(id);
+  el.className = `status ${mode}`;
+  el.textContent = text;
+}
+
+function log(data){
+  logEl.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
+
+function selectedKeyMeta(){
+  const selected = document.getElementById('llmKeySelect').value;
+  return keyRecords.find(k => k.key_id === selected && !k.revoked) || null;
+}
+
+function updateSelectedModel(){
+  const meta = selectedKeyMeta();
+  document.getElementById('selectedModel').value = meta ? `${meta.model} (${meta.provider})` : '';
+}
+
+async function refreshLlmKeys(){
+  const res = await fetch('/assistant/api-keys');
+  if (!res.ok) return;
+  keyRecords = await res.json();
+
+  const select = document.getElementById('llmKeySelect');
+  const previous = select.value;
+  select.innerHTML = '<option value="">(select key)</option>';
+  keyRecords.filter(k => !k.revoked).forEach(k => {
+    const option = document.createElement('option');
+    option.value = k.key_id;
+    option.textContent = `${k.name} | ${k.model} | ${k.provider}`;
+    select.appendChild(option);
+  });
+
+  if (previous && keyRecords.some(k => k.key_id === previous && !k.revoked)) {
+    select.value = previous;
+  } else if (select.options.length > 1) {
+    select.selectedIndex = 1;
+  }
+
+  updateSelectedModel();
+}
+
+async function runAssistant(){
+  const key = selectedKeyMeta();
+  if (!key){
+    setStatus('assistantStatus', 'Select a valid API key first', 'warn');
+    return;
+  }
+
+  setStatus('assistantStatus','Loading...','warn');
+  const payload = {
+    provider: key.provider,
+    user_query: document.getElementById('prompt').value,
+    model: (document.getElementById('assistantModel').value || '').trim() || key.model,
+    api_key_id: key.key_id,
+  };
+
+  const res = await fetch('/assistant/query', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  lastAssistantResponse = data;
+  log(data);
+  setStatus('assistantStatus', res.ok ? 'Success' : `Error ${res.status}`, res.ok ? 'ok' : 'err');
+}
+
+function exportAssistantCsv(){
+  if (!lastAssistantResponse || !lastAssistantResponse.answer){
+    setStatus('assistantStatus', 'Run assistant first', 'warn');
+    return;
+  }
+  const row = {
+    timestamp_utc: new Date().toISOString(),
+    provider: lastAssistantResponse.provider || '',
+    model: lastAssistantResponse.model || '',
+    prompt: document.getElementById('prompt').value || '',
+    answer: lastAssistantResponse.answer || ''
+  };
+  const headers = Object.keys(row);
+  const values = headers.map(h => `"${String(row[h]).replaceAll('"','""')}"`);
+  const csv = headers.join(',') + '\n' + values.join(',') + '\n';
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `assistant_answer_${Date.now()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setStatus('assistantStatus', 'Assistant CSV exported', 'ok');
+}
+
+document.getElementById('llmKeySelect').addEventListener('change', updateSelectedModel);
+refreshLlmKeys();
+</script>
+</body>
+</html>

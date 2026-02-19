@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.main import app
+import app.routers.data as data_router
 
 client = TestClient(app)
 
@@ -74,9 +76,41 @@ def test_openapi_contains_data_source_enum_and_response_models():
     data_path = schema["paths"]["/data/{source}"]["get"]
     source_param = next(param for param in data_path["parameters"] if param["name"] == "source")
     source_schema = source_param["schema"]
-    assert source_schema["$ref"].endswith("DataSource")
+    if "$ref" in source_schema:
+        assert source_schema["$ref"].endswith("DataSource")
+    elif "allOf" in source_schema and source_schema["allOf"]:
+        assert source_schema["allOf"][0].get("$ref", "").endswith("DataSource")
+    else:
+        assert source_schema.get("type") == "string"
+        assert set(source_schema.get("enum", [])) == {"crm", "support", "analytics"}
 
     responses = data_path["responses"]
     assert "200" in responses
     assert "422" in responses
     assert "503" in responses
+
+
+def test_data_endpoint_streaming_returns_ndjson(monkeypatch):
+    monkeypatch.setattr(settings, "ENABLE_STREAMING", True)
+    monkeypatch.setattr(settings, "STREAM_MIN_TOTAL_RESULTS", 1)
+    monkeypatch.setattr(settings, "STREAM_CHUNK_SIZE", 2)
+
+    response = client.get("/data/analytics?stream=true&page=1&page_size=5")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    body = response.text.strip().splitlines()
+    assert len(body) >= 2
+
+
+def test_data_endpoint_rate_limit_exceeded(monkeypatch):
+    monkeypatch.setattr(settings, "RATE_LIMIT_PER_SOURCE", 1)
+    monkeypatch.setattr(settings, "RATE_LIMIT_WINDOW_SECONDS", 60)
+    data_router.rate_limiter._buckets.clear()
+
+    first = client.get("/data/crm?page=1&page_size=1")
+    second = client.get("/data/crm?page=1&page_size=1")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    payload = second.json()
+    assert payload["error"]["code"] == "RATE_LIMIT_EXCEEDED"

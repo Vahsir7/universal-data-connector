@@ -2,7 +2,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from app.routers import assistant, data, health
+from app.routers import assistant, auth, data, export, health, ui, webhooks
 from app.utils.logging import configure_logging
 
 from fastapi import FastAPI, HTTPException, Request
@@ -32,6 +32,10 @@ app = FastAPI(
         {"name": "Data", "description": "LLM-callable data access endpoints"},
         {"name": "Health", "description": "Service liveness and readiness checks"},
         {"name": "Assistant", "description": "Direct GPT/Claude function-calling endpoint"},
+        {"name": "Auth", "description": "API key lifecycle and admin operations"},
+        {"name": "Webhooks", "description": "Inbound real-time update notifications"},
+        {"name": "Export", "description": "Download filtered data as CSV or Excel"},
+        {"name": "UI", "description": "Browser-based API test interface"},
     ],
 )
 
@@ -92,3 +96,7 @@ async def unhandled_error_handler(request: Request, exc: Exception):
 app.include_router(health.router)
 app.include_router(data.router)
 app.include_router(assistant.router)
+app.include_router(auth.router)
+app.include_router(export.router)
+app.include_router(webhooks.router)
+app.include_router(ui.router)

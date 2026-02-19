@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Universal Data Connector Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Segoe UI, Arial, sans-serif; background: #f3f4f6; color: #111827; }
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    .header { background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .header h2 { margin: 0; font-size: 20px; font-weight: 600; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a { text-decoration: none; border-radius: 8px; padding: 8px 12px; background: #e5e7eb; color: #111827; font-size: 13px; }
+    .nav a.active { background: #1f2937; color: #fff; }
+    .content { width: 100%; max-width: 1440px; margin: 0 auto; padding: 24px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    label { font-size: 12px; color: #4b5563; display: block; margin-bottom: 4px; }
+    input, select, button { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 14px; }
+    button { background: #374151; color: #fff; border: 0; cursor: pointer; }
+    button:hover { background: #1f2937; }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .status { font-size: 12px; font-weight: 600; margin-top: 8px; }
+    .ok { color: #047857; } .warn { color: #b45309; } .err { color: #b91c1c; }
+    pre { background: #f9fafb; color: #111827; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; max-height: 380px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px; font-size: 13px; text-align: left; }
+    th { background: #f3f4f6; }
+    @media (max-width: 900px) {
+      .content { padding: 16px; }
+      .row3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h2>Data</h2>
+    <div class="nav">
+      <a href="/home/llm">LLM</a>
+      <a href="/home/data" class="active">Data</a>
+      <a href="/home/api">API Management</a>
+    </div>
+  </div>
+
+  <main class="content">
+  <section class="card">
+    <div class="row3">
+      <div><label>Source</label><select id="source"><option>crm</option><option>support</option><option>analytics</option></select></div>
+      <div><label>Page</label><input id="page" value="1" /></div>
+      <div><label>Page Size</label><input id="pageSize" value="10" /></div>
+    </div>
+    <div class="row3" style="margin-top:8px;">
+      <div><label>Status</label><input id="status" /></div>
+      <div><label>Priority</label><input id="priority" /></div>
+      <div><label>Metric</label><input id="metric" /></div>
+    </div>
+    <div class="row3" style="margin-top:10px;">
+      <button onclick="fetchData(false)">Fetch</button>
+      <button onclick="fetchData(true)">Force Stream</button>
+      <button onclick="downloadDataCsv()">Export Data CSV</button>
+    </div>
+    <div id="dataStatus" class="status">Ready (cache + streaming enabled)</div>
+  </section>
+
+  <section class="card">
+    <h3 style="margin-top:0;">Result</h3>
+    <div id="tableWrap">No data yet.</div>
+  </section>
+
+  <section class="card">
+    <h3 style="margin-top:0;">Response Log</h3>
+    <pre id="log">Ready</pre>
+  </section>
+  </main>
+</div>
+
+<script>
+const logEl = document.getElementById('log');
+const tableWrap = document.getElementById('tableWrap');
+
+function setStatus(id, text, mode='ok') {
+  const el = document.getElementById(id);
+  el.className = `status ${mode}`;
+  el.textContent = text;
+}
+
+function log(data){
+  logEl.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
+
+function renderTable(rows){
+  if (!Array.isArray(rows) || rows.length === 0){
+    tableWrap.textContent = 'No rows returned.';
+    return;
+  }
+
+  const cols = [];
+  rows.forEach(r => Object.keys(r || {}).forEach(k => { if (!cols.includes(k)) cols.push(k); }));
+  let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+  rows.forEach(r => {
+    html += '<tr>' + cols.map(c => `<td>${typeof r[c] === 'object' ? JSON.stringify(r[c]) : (r[c] ?? '')}</td>`).join('') + '</tr>';
+  });
+  html += '</tbody></table>';
+  tableWrap.innerHTML = html;
+}
+
+async function fetchData(forceStream){
+  setStatus('dataStatus', 'Loading...','warn');
+  const source = document.getElementById('source').value;
+  const pageSize = Number(document.getElementById('pageSize').value || '10');
+  const stream = forceStream || pageSize >= 25;
+  const params = new URLSearchParams({
+    page: document.getElementById('page').value || '1',
+    page_size: String(pageSize),
+    stream: String(stream)
+  });
+
+  [['status','status'],['priority','priority'],['metric','metric']].forEach(([id,key]) => {
+    const value = document.getElementById(id).value.trim();
+    if (value) params.set(key, value);
+  });
+
+  const res = await fetch(`/data/${source}?${params.toString()}`);
+  const text = await res.text();
+  if (!res.ok){
+    setStatus('dataStatus', `Error ${res.status}`, 'err');
+    try { log(JSON.parse(text)); } catch { log(text); }
+    return;
+  }
+
+  if (stream){
+    const lines = text.trim().split('\n').filter(Boolean).map(l=>JSON.parse(l));
+    renderTable(lines.filter(x=>x.type==='record').map(x=>x.data));
+    log(lines);
+  } else {
+    const data = JSON.parse(text);
+    renderTable(data.data || []);
+    log(data);
+  }
+
+  setStatus('dataStatus','Success (cached when eligible)','ok');
+}
+
+async function downloadDataCsv(){
+  const source = document.getElementById('source').value;
+  const params = new URLSearchParams({ export_format: 'csv' });
+  [['status','status'],['priority','priority'],['metric','metric']].forEach(([id,key]) => {
+    const value = document.getElementById(id).value.trim();
+    if (value) params.set(key, value);
+  });
+
+  const res = await fetch(`/export/${source}?${params.toString()}`);
+  if (!res.ok){ log(await res.json()); return; }
+
+  const blob = await res.blob();
+  const cd = res.headers.get('content-disposition') || '';
+  const match = cd.match(/filename=([^;]+)/);
+  const filename = match ? match[1] : `${source}_export.csv`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  log(`Downloaded ${filename}`);
+}
+</script>
+</body>
+</html>

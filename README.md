@@ -241,6 +241,41 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+## Production extras implemented
+
+- Redis caching for frequently accessed `/data/{source}` responses (with in-memory fallback if Redis is unavailable)
+- Per-source rate limiting (keyed by client IP + source)
+- Optional NDJSON streaming for large datasets via `stream=true`
+- Web UI at `/ui` for testing data, assistant, and export endpoints
+- API key authentication + admin-managed key lifecycle
+- Webhook ingestion endpoint for real-time update notifications
+- CSV/XLSX export endpoints
+
+### Useful environment variables
+
+- `ENABLE_REDIS_CACHE`, `REDIS_URL`, `CACHE_TTL_SECONDS`
+- `RATE_LIMIT_PER_SOURCE`, `RATE_LIMIT_WINDOW_SECONDS`
+- `ENABLE_STREAMING`, `STREAM_MIN_TOTAL_RESULTS`, `STREAM_CHUNK_SIZE`
+- `AUTH_ENABLED`, `ADMIN_API_KEY`, `APP_DB_PATH`, `DEFAULT_CLIENT_API_KEYS`
+- `WEBHOOK_SHARED_SECRET`, `WEBHOOK_MAX_EVENTS`
+
+### New endpoints
+
+- `GET /ui` (also available at `GET /home`)
+- `POST /auth/api-keys` (admin only: `X-Admin-Key`)
+- `GET /auth/api-keys` (admin only)
+- `GET /auth/api-keys/options` (admin only, for UI dropdown)
+- `POST /auth/api-keys/{key_id}/revoke` (admin only)
+- `POST /webhooks/events` (`X-Webhook-Secret` if configured)
+- `GET /webhooks/events` (admin only)
+- `GET /export/{source}?export_format=csv|xlsx`
+
+### Streaming example
+
+```bash
+curl "http://127.0.0.1:8000/data/analytics?stream=true&page=1&page_size=50"
+```
+
 ## Docker
 
 ```bash
