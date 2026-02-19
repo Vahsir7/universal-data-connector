@@ -1,3 +1,10 @@
+Dear Candidate,
+
+Thank you for your interest in the Software Development Engineer (SDE) internship position at Articence. Based on your background, we would like to invite you to participate in a technical evaluation.
+
+Please select one of the following tracks that best aligns with your skills:
+
+- Function Calling with LLM
 
 # Universal Data Connector
 
@@ -6,7 +13,9 @@
 Build a production-quality **Universal Data Connector** using FastAPI that provides a unified interface for an LLM to access different data sources through function calling. The connector must be intelligent enough to identify data types, apply business rules, and optimize responses for voice conversations where bandwidth and latency matter.
 
 ### Business Context
+
 You're building this for a SaaS company where customers need to query their data (CRM, support tickets, analytics) through voice conversations with an AI assistant. The key constraints are:
+
 - Voice conversations require quick, concise responses (not massive data dumps)
 - Data must be contextually relevant and filtered
 - The LLM needs metadata to understand how to use each data source
@@ -17,6 +26,7 @@ You're building this for a SaaS company where customers need to query their data
 ## 📋 Requirements
 
 ### Core Functionality
+
 1. **FastAPI Server** with health checks and proper error handling
 2. **Multiple Data Connectors** (at least 3 types):
    - Customer CRM data
@@ -36,6 +46,7 @@ You're building this for a SaaS company where customers need to query their data
    - Include data freshness/staleness indicators
 
 ### Technical Requirements
+
 - Python 3.11+
 - FastAPI with Pydantic v2 models
 - Proper logging and error handling
@@ -45,7 +56,9 @@ You're building this for a SaaS company where customers need to query their data
 - Docker deployment ready
 
 ### Voice-Optimized Business Rules
+
 Implement rules like:
+
 - **Limit results**: Default max 10 items for voice
 - **Prioritization**: Return most recent/relevant first
 - **Summarization**: Aggregate metrics instead of raw data when appropriate
@@ -107,6 +120,7 @@ universal-data-connector/
 ## 🎓 Learning Objectives
 
 By completing this exercise, you will demonstrate:
+
 1. **API Design**: Creating clean, RESTful APIs with FastAPI
 2. **Type Safety**: Using Pydantic models and Python type hints
 3. **Abstraction**: Building reusable base classes and interfaces
@@ -120,24 +134,28 @@ By completing this exercise, you will demonstrate:
 ## ✅ Evaluation Criteria
 
 ### Code Quality (30%)
+
 - Clean, readable code with proper structure
 - Type hints and Pydantic models used correctly
 - Comprehensive error handling
 - Logging throughout
 
 ### Functionality (30%)
+
 - All endpoints working correctly
 - Business rules properly implemented
 - Data filtering and optimization working
 - Mock data realistic and useful
 
 ### LLM Integration (20%)
+
 - OpenAPI schema properly generated
 - Function calling examples work
 - Responses optimized for voice
 - Good parameter validation
 
 ### Documentation (20%)
+
 - Clear README with setup instructions
 - Inline code comments where needed
 - API documentation (auto-generated + custom)
@@ -148,30 +166,35 @@ By completing this exercise, you will demonstrate:
 ## 🚀 Getting Started
 
 ### Phase 1: Setup (Day 1)
+
 1. Set up project structure
 2. Create base models and connector interface
 3. Implement mock data generators
 4. Get FastAPI running with health check
 
 ### Phase 2: Core Connectors (Days 2-3)
+
 1. Implement CRM connector
 2. Implement support ticket connector
 3. Implement analytics connector
 4. Add data type identification
 
 ### Phase 3: Business Rules (Day 4)
+
 1. Build business rules engine
 2. Implement voice optimizations
 3. Add pagination and filtering
 4. Test with sample queries
 
 ### Phase 4: LLM Integration (Day 5)
+
 1. Create function calling schemas
 2. Test with LLM (Claude or OpenAI)
 3. Optimize response formats
 4. Add metadata and context
 
 ### Phase 5: Polish (Day 6)
+
 1. Add comprehensive logging
 2. Write tests
 3. Create Docker setup
@@ -182,18 +205,19 @@ By completing this exercise, you will demonstrate:
 ## 📝 Submission Requirements
 
 1. **GitHub Repository** with:
+
    - All source code
    - README with setup instructions
    - Sample .env file
    - Working Docker Compose setup
-
 2. **Demo Video** (5 minutes max):
+
    - Show the API running
    - Demonstrate 3-4 example queries
    - Show LLM function calling integration
    - Explain one interesting technical decision
-
 3. **Written Summary** (1 page):
+
    - Challenges faced and solutions
    - Design decisions and tradeoffs
    - What you'd improve with more time
@@ -224,6 +248,7 @@ By completing this exercise, you will demonstrate:
 ## 🎉 Bonus Challenges (Optional)
 
 If you finish early and want to go further:
+
 1. Add caching layer (Redis) for frequently accessed data
 2. Implement rate limiting per data source
 3. Add streaming responses for large datasets
@@ -241,41 +266,6 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-## Production extras implemented
-
-- Redis caching for frequently accessed `/data/{source}` responses (with in-memory fallback if Redis is unavailable)
-- Per-source rate limiting (keyed by client IP + source)
-- Optional NDJSON streaming for large datasets via `stream=true`
-- Web UI at `/ui` for testing data, assistant, and export endpoints
-- API key authentication + admin-managed key lifecycle
-- Webhook ingestion endpoint for real-time update notifications
-- CSV/XLSX export endpoints
-
-### Useful environment variables
-
-- `ENABLE_REDIS_CACHE`, `REDIS_URL`, `CACHE_TTL_SECONDS`
-- `RATE_LIMIT_PER_SOURCE`, `RATE_LIMIT_WINDOW_SECONDS`
-- `ENABLE_STREAMING`, `STREAM_MIN_TOTAL_RESULTS`, `STREAM_CHUNK_SIZE`
-- `AUTH_ENABLED`, `ADMIN_API_KEY`, `APP_DB_PATH`, `DEFAULT_CLIENT_API_KEYS`
-- `WEBHOOK_SHARED_SECRET`, `WEBHOOK_MAX_EVENTS`
-
-### New endpoints
-
-- `GET /ui` (also available at `GET /home`)
-- `POST /auth/api-keys` (admin only: `X-Admin-Key`)
-- `GET /auth/api-keys` (admin only)
-- `GET /auth/api-keys/options` (admin only, for UI dropdown)
-- `POST /auth/api-keys/{key_id}/revoke` (admin only)
-- `POST /webhooks/events` (`X-Webhook-Secret` if configured)
-- `GET /webhooks/events` (admin only)
-- `GET /export/{source}?export_format=csv|xlsx`
-
-### Streaming example
-
-```bash
-curl "http://127.0.0.1:8000/data/analytics?stream=true&page=1&page_size=50"
-```
-
 ## Docker
 
 ```bash
@@ -283,58 +273,3 @@ docker-compose up --build
 ```
 
 Visit: http://localhost:8000/docs
-
-### High-concurrency Docker profile
-
-The container runtime is configured for multi-worker Uvicorn with tuned backlog/keep-alive:
-
-- `UVICORN_WORKERS` (default `4` in Docker Compose)
-- `UVICORN_BACKLOG` (default `4096`)
-- `UVICORN_TIMEOUT_KEEP_ALIVE` (default `5`)
-- Redis is configured with `allkeys-lru` and a memory cap for cache stability under pressure.
-
-### Kubernetes deployment (autoscaling-ready)
-
-Manifest files are in [k8s/kustomization.yaml](k8s/kustomization.yaml).
-
-1) Build and push image
-
-```bash
-docker build -t your-registry/universal-data-connector:latest .
-docker push your-registry/universal-data-connector:latest
-```
-
-2) Create a real secret file from template and fill values
-
-```bash
-cp k8s/secret.example.yaml k8s/secret.yaml
-```
-
-3) Apply manifests
-
-```bash
-kubectl apply -f k8s/secret.yaml
-kubectl apply -k k8s
-```
-
-4) Check rollout and autoscaling
-
-```bash
-kubectl -n udc get pods
-kubectl -n udc get hpa
-kubectl -n udc get svc
-```
-
-### 10k concurrent requests guidance
-
-This repository now includes production-oriented defaults (multi-worker app pods, readiness/liveness probes, HPA, PDB, topology spread, Redis cache), but **10k concurrency is infrastructure-dependent**.
-
-To reliably sustain 10k concurrent requests, validate with load testing and tune:
-
-- node count and CPU/memory headroom
-- ingress/controller connection limits and timeouts
-- HPA thresholds and max replicas
-- Redis sizing and latency
-- request mix (cache hit ratio, payload size, streaming usage)
-
-Use staged load tests (1k -> 3k -> 5k -> 10k) and tune based on p95/p99 latency and error rates.

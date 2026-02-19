@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: udc-api
+  namespace: udc
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: udc-api
+  template:
+    metadata:
+      labels:
+        app: udc-api
+    spec:
+      containers:
+        - name: api
+          image: udc-api:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - >-
+              uvicorn app.main:app
+              --host 0.0.0.0
+              --port 8000
+              --workers ${UVICORN_WORKERS:-2}
+              --loop uvloop
+              --http httptools
+              --backlog ${UVICORN_BACKLOG:-4096}
+              --timeout-keep-alive ${UVICORN_TIMEOUT_KEEP_ALIVE:-5}
+              --proxy-headers
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: udc-config
+            - secretRef:
+                name: udc-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 8
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: udc-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: udc-api
+  namespace: udc
+spec:
+  selector:
+    app: udc-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: udc-api-pdb
+  namespace: udc
+spec:
+  minAvailable: 60%
+  selector:
+    matchLabels:
+      app: udc-api
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: udc-api-hpa
+  namespace: udc
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: udc-api
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 20
+          periodSeconds: 60

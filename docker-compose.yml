@@ -1,17 +1,46 @@
 
-version: '3.9'
-
 services:
   api:
     build: .
     ports:
       - "8000:8000"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - AUTH_ENABLED=false
+      - UVICORN_WORKERS=4
+      - UVICORN_BACKLOG=4096
+      - UVICORN_TIMEOUT_KEEP_ALIVE=5
+    volumes:
+      - app-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru", "--tcp-backlog", "511"]
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  app-data:
+  redis-data:
