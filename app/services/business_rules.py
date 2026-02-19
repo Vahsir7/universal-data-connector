@@ -32,6 +32,8 @@ def _record_dt(row: Dict[str, Any]) -> Optional[datetime]:
 
 def apply_business_filters(
     data: List[Dict[str, Any]],
+    ticket_id: Optional[int] = None,
+    customer_id: Optional[int] = None,
     status: Optional[str] = None,
     priority: Optional[str] = None,
     metric: Optional[str] = None,
@@ -39,6 +41,12 @@ def apply_business_filters(
     end_date: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     out = data
+
+    if ticket_id is not None:
+        out = [r for r in out if int(r.get("ticket_id", -1)) == ticket_id]
+
+    if customer_id is not None:
+        out = [r for r in out if int(r.get("customer_id", -1)) == customer_id]
 
     if status is not None:
         out = [r for r in out if str(r.get("status", "")).lower() == status.lower()]

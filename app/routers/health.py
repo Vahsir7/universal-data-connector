@@ -15,18 +15,23 @@ REQUIRED_DATA_FILES = [
 ]
 
 
-@router.get("/live")
+@router.get("/live", tags=["Health"])
 def liveness():
     return {"status": "alive"}
 
 
-@router.get("/ready")
+@router.get("/ready", tags=["Health"])
 def readiness():
     missing_files = [str(path) for path in REQUIRED_DATA_FILES if not path.exists()]
     if missing_files:
-        logger.warning(f"Readiness check failed. Missing files: {missing_files}")
+        logger.warning("Readiness check failed. Missing files: %s", missing_files)
         return JSONResponse(
             status_code=503,
             content={"status": "unavailable", "missing_files": missing_files},
         )
     return {"status": "ready"}
+
+
+@router.get("", tags=["Health"])
+def health_summary():
+    return readiness()
