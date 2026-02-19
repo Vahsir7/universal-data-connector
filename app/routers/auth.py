@@ -1,3 +1,10 @@
+"""Auth router — API key lifecycle management (admin-only).
+
+All endpoints require the X-Admin-Key header.  They allow the admin to
+create, list, and revoke client API keys used for authenticating
+requests to the data and assistant endpoints.
+"""
+
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +14,9 @@ from app.services.auth import api_key_service, require_admin_key
 
 
 router = APIRouter(prefix="/auth", tags=["Auth"], dependencies=[Depends(require_admin_key)])
+
+
+# ---- Pydantic schemas for API key CRUD ----
 
 
 class CreateApiKeyRequest(BaseModel):

@@ -1,3 +1,11 @@
+"""UI router — serves browser-based HTML pages for testing the API.
+
+Provides a simple web interface with three tabs:
+  /home/llm  — test the LLM assistant endpoint
+  /home/data — explore data source queries
+  /home/api  — API key management
+"""
+
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -6,6 +14,7 @@ from fastapi.responses import HTMLResponse
 
 router = APIRouter(tags=["UI"])
 
+# Static HTML files live alongside the app code in app/ui/
 UI_DIR = Path(__file__).resolve().parents[1] / "ui"
 UI_LLM_PATH = UI_DIR / "llm.html"
 UI_DATA_PATH = UI_DIR / "data.html"

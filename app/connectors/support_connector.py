@@ -1,3 +1,4 @@
+"""Support ticket connector — loads ticket records from a local JSON file."""
 
 import json
 from pathlib import Path
@@ -5,7 +6,9 @@ from typing import Any, Dict, List
 
 from app.connectors.base import BaseConnector
 
+
 class SupportConnector(BaseConnector):
+    """Reads support-ticket records from data/support_tickets.json."""
 
     def fetch(self, **_kwargs) -> List[Dict[str, Any]]:
         file_path = Path(__file__).resolve().parents[2] / "data" / "support_tickets.json"

@@ -1,3 +1,9 @@
+"""Export router — download filtered data as CSV or Excel.
+
+Uses the same get_unified_data pipeline, iterating through all pages
+to collect every matching record, then serializes to the chosen format.
+"""
+
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -21,6 +27,7 @@ def _collect_all_rows(
     start_date: Optional[str],
     end_date: Optional[str],
 ) -> List[Dict[str, object]]:
+    """Iterate through all pages to collect every matching record for export."""
     page = 1
     rows: List[Dict[str, object]] = []
 

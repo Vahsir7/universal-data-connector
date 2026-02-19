@@ -1,3 +1,10 @@
+"""LLM provider API-key storage - store, list, revoke, and resolve keys.
+
+Keys can originate from environment variables (auto-imported on startup)
+or be manually created via the /assistant/keys endpoints.
+resolver_key() picks the best available key: manual → stored → env.
+"""
+
 import hashlib
 import uuid
 from datetime import datetime, timezone
@@ -9,6 +16,7 @@ from app.services.db import get_db_service
 
 
 class LlmApiKeyService:
+    """CRUD and resolution for per-provider LLM API keys (SQLite-backed)."""
     def __init__(self) -> None:
         self._db = get_db_service()
         self._bootstrap_env_keys()
@@ -135,6 +143,7 @@ class LlmApiKeyService:
         return changed > 0
 
     def resolve_key(self, provider: LLMProvider, api_key_id: Optional[str], manual_api_key: Optional[str]) -> str:
+        """Resolve the best available API key: manual > stored > env fallback."""
         if manual_api_key and manual_api_key.strip():
             return manual_api_key.strip()
 

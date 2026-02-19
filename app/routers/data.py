@@ -1,3 +1,15 @@
+"""Primary data access router — the LLM calls this endpoint via tool/function calling.
+
+GET /data/{source} is the main API contract.  It returns paginated,
+filtered, voice-optimized data wrapped in a consistent JSON envelope
+with metadata (total results, freshness, pagination, etc.).
+
+Bonus features integrated here:
+  - Per-source rate limiting (429 on excess)
+  - Response caching (Redis or in-memory)
+  - Optional NDJSON streaming for large result sets
+"""
+
 import logging
 import json
 from typing import Optional
@@ -44,6 +56,7 @@ def get_data(
     stream: bool = Query(False, description="Stream large responses as NDJSON"),
     _auth: None = Depends(require_api_key),
 ):
+    # Identify caller for per-client rate limiting
     client_id = request.client.host if request.client and request.client.host else "anonymous"
     allowed, retry_after = rate_limiter.allow(source=source.value, client_id=client_id)
     if not allowed:
@@ -56,6 +69,7 @@ def get_data(
             },
         )
 
+    # Build a deterministic cache key from path + query params
     cache_key = build_data_cache_key(
         path=f"/data/{source.value}",
         params={
@@ -69,6 +83,7 @@ def get_data(
         },
     )
 
+    # Try cache first, then fall back to live data retrieval
     cached = cache_service.get(cache_key)
     if cached is not None:
         response_payload = DataResponse.model_validate(cached)
@@ -101,6 +116,7 @@ def get_data(
             ttl_seconds=settings.CACHE_TTL_SECONDS,
         )
 
+    # Only stream if the flag is set, streaming is enabled, and the result set is large enough
     should_stream = (
         stream
         and settings.ENABLE_STREAMING
@@ -108,6 +124,7 @@ def get_data(
     )
 
     if should_stream:
+        # Stream as Newline-Delimited JSON: metadata line, record lines, end line
         chunk_size = settings.STREAM_CHUNK_SIZE
 
         def _iter_ndjson():

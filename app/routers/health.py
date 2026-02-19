@@ -1,3 +1,11 @@
+"""Health-check router — liveness and readiness probes.
+
+Kubernetes (and Docker health checks) use these endpoints:
+  - /health/live  — always returns 200 to prove the process is alive
+  - /health/ready — returns 200 only if required data files exist
+  - /health       — convenience alias for /health/ready
+"""
+
 import logging
 from pathlib import Path
 
@@ -7,6 +15,7 @@ from fastapi.responses import JSONResponse
 router = APIRouter(prefix="/health")
 logger = logging.getLogger(__name__)
 
+# Data files the service depends on — if any are missing, readiness fails
 BASE_DIR = Path(__file__).resolve().parents[2]
 REQUIRED_DATA_FILES = [
     BASE_DIR / "data" / "customers.json",

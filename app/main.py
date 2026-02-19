@@ -1,3 +1,5 @@
+"""Application entry point, creates the FastAPI app, registers middleware, exception handlers, and all sub-routers."""
+
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -14,7 +16,7 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
-#lifespan of the application
+# Lifespan context manager – runs startup/shutdown logic
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info("Starting Universal Data Connector...")
@@ -39,7 +41,7 @@ app = FastAPI(
     ],
 )
 
-#requesting logging middleware
+# Request-logging middleware – logs method, path, status and duration
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
@@ -48,7 +50,7 @@ async def log_requests(request: Request, call_next):
     logger.info("%s %s -> %s (%.2fms)", request.method, request.url.path, response.status_code, duration)
     return response
 
-# 3. Validation error handler (422)
+# Validation error handler – returns structured 422 JSON
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(_request: Request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={
@@ -59,7 +61,7 @@ async def validation_error_handler(_request: Request, exc: RequestValidationErro
         }
     })
 
-# 4. HTTP exception handler (404, 503, etc.)
+# HTTP exception handler – normalises detail into error envelope
 @app.exception_handler(HTTPException)
 async def http_error_handler(_request: Request, exc: HTTPException):
     detail = exc.detail
@@ -80,7 +82,7 @@ async def http_error_handler(_request: Request, exc: HTTPException):
         }
     })
 
-# 5. Catch-all unhandled exception handler (500)
+# Catch-all handler – prevents raw 500 tracebacks leaking to clients
 @app.exception_handler(Exception)
 async def unhandled_error_handler(request: Request, exc: Exception):
     logger.exception("Unhandled error on %s: %s", request.url.path, exc)
@@ -91,8 +93,7 @@ async def unhandled_error_handler(request: Request, exc: Exception):
         }
     })
 
-
-
+# Register all sub-routers
 app.include_router(health.router)
 app.include_router(data.router)
 app.include_router(assistant.router)

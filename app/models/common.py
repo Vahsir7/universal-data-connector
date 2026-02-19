@@ -1,9 +1,16 @@
+"""Shared response and error models used across all endpoints.
+
+Every JSON response is wrapped in either DataResponse (success) or
+ErrorResponse (failure) to give LLMs a predictable schema.
+"""
+
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class Metadata(BaseModel):
+    """Page-level metadata included in every DataResponse."""
     model_config = ConfigDict(extra="forbid")
 
     total_results: int = Field(..., description="Total records after filters")
@@ -19,6 +26,8 @@ class Metadata(BaseModel):
 
 
 class DataResponse(BaseModel):
+    """Successful data response wrapper."""
+
     model_config = ConfigDict(extra="forbid")
 
     data: List[Any]
@@ -26,6 +35,8 @@ class DataResponse(BaseModel):
 
 
 class ErrorBody(BaseModel):
+    """Inner error payload with machine-readable code and human message."""
+
     model_config = ConfigDict(extra="forbid")
 
     code: str
@@ -34,6 +45,8 @@ class ErrorBody(BaseModel):
 
 
 class ErrorResponse(BaseModel):
+    """Top-level error envelope returned on 4xx / 5xx."""
+
     model_config = ConfigDict(extra="forbid")
 
     error: ErrorBody

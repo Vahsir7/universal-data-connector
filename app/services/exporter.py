@@ -1,3 +1,9 @@
+"""CSV and Excel export builders for filtered data.
+
+Used by the /export endpoint to let users download query results
+in common spreadsheet formats.
+"""
+
 import csv
 from io import BytesIO, StringIO
 from typing import Any, Dict, List, Tuple
@@ -6,6 +12,7 @@ from openpyxl import Workbook
 
 
 def _collect_columns(rows: List[Dict[str, Any]]) -> List[str]:
+    """Build a stable column list by scanning all rows (preserves order)."""
     columns: List[str] = []
     for row in rows:
         for key in row.keys():

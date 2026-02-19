@@ -1,3 +1,13 @@
+"""Assistant router — LLM tool-calling endpoint and provider API key management.
+
+POST /assistant/query accepts a natural-language question, forwards it
+to the selected LLM provider (OpenAI / Anthropic / Gemini), lets the
+model call the fetch_data tool, and returns data + a natural-language answer.
+
+The /assistant/api-keys sub-endpoints let users store, list, and
+revoke provider API keys so they don't have to pass them every request.
+"""
+
 import logging
 from typing import List, Optional
 
@@ -13,6 +23,9 @@ from app.services.llm_api_keys import llm_api_key_service
 
 router = APIRouter(prefix="/assistant", tags=["Assistant"])
 logger = logging.getLogger(__name__)
+
+
+# ---- Pydantic request/response schemas for the API-key sub-endpoints ----
 
 
 class LlmApiKeyCreateRequest(BaseModel):

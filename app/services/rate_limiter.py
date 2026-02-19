@@ -1,3 +1,9 @@
+"""Sliding-window rate limiter keyed by (source, client_id).
+
+Each source-client pair gets its own time window; once the limit is hit
+the caller receives a Retry-After hint (seconds).
+"""
+
 import threading
 import time
 from dataclasses import dataclass
@@ -8,11 +14,13 @@ from app.config import settings
 
 @dataclass
 class _Bucket:
+    """Tracks request count within a rolling window."""
     count: int
     window_start: float
 
 
 class SourceRateLimiter:
+    """Thread-safe in-memory per-source rate limiter."""
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._buckets: Dict[str, _Bucket] = {}

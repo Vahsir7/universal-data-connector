@@ -1,3 +1,9 @@
+"""Webhook event store – persists inbound webhook payloads in SQLite.
+
+The webhook router appends events here; the events endpoint reads
+them back in reverse-chronological order.
+"""
+
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -6,6 +12,7 @@ from app.services.db import get_db_service
 
 
 class WebhookEventStore:
+    """Append-only log of received webhook events (SQLite-backed)."""
     def __init__(self) -> None:
         self._db = get_db_service()
 

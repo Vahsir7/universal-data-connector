@@ -1,3 +1,9 @@
+"""Pydantic models for the /assistant LLM endpoint.
+
+Covers the request/response schemas and the tool-call intermediate
+representation used to show how the LLM interacted with data sources.
+"""
+
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -5,12 +11,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class LLMProvider(str, Enum):
+    """Supported LLM providers."""
     openai = "openai"
     anthropic = "anthropic"
     gemini = "gemini"
 
 
 class ToolFetchDataArgs(BaseModel):
+    """Arguments the LLM passes when calling the fetch_data tool."""
+
     model_config = ConfigDict(extra="forbid")
 
     source: str = Field(..., description="Data source: crm, support, analytics")
@@ -28,6 +37,8 @@ class ToolFetchDataArgs(BaseModel):
 
 
 class AssistantQueryRequest(BaseModel):
+    """Incoming request body for /assistant/query."""
+
     model_config = ConfigDict(extra="forbid")
 
     provider: LLMProvider
@@ -39,6 +50,8 @@ class AssistantQueryRequest(BaseModel):
 
 
 class AssistantToolCall(BaseModel):
+    """Record of a single tool invocation made by the LLM."""
+
     model_config = ConfigDict(extra="forbid")
 
     tool_name: str
@@ -47,6 +60,8 @@ class AssistantToolCall(BaseModel):
 
 
 class AssistantQueryResponse(BaseModel):
+    """Response body for /assistant/query."""
+
     model_config = ConfigDict(extra="forbid")
 
     provider: LLMProvider

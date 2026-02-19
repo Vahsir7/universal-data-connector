@@ -1,3 +1,9 @@
+"""Two-tier caching service: Redis (primary) with in-memory fallback.
+
+When Redis is unavailable the service automatically degrades to a
+thread-safe dictionary with TTL expiry, so the app keeps running.
+"""
+
 import json
 import threading
 import time
@@ -10,11 +16,13 @@ from app.config import settings
 
 @dataclass
 class _MemoryEntry:
+    """In-memory cache entry with expiration timestamp."""
     value: Dict[str, Any]
     expires_at: float
 
 
 class CacheService:
+    """Redis-first cache that falls back to local memory on connection errors."""
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._memory_store: Dict[str, _MemoryEntry] = {}
@@ -89,6 +97,7 @@ class CacheService:
 
 
 def build_data_cache_key(path: str, params: Dict[str, Any]) -> str:
+    """Deterministic cache key for /data endpoint responses."""
     canonical = {k: v for k, v in sorted(params.items()) if v is not None}
     blob = json.dumps({"path": path, "params": canonical}, sort_keys=True)
     digest = sha256(blob.encode("utf-8")).hexdigest()
@@ -96,6 +105,7 @@ def build_data_cache_key(path: str, params: Dict[str, Any]) -> str:
 
 
 def build_assistant_cache_key(params: Dict[str, Any]) -> str:
+    """Deterministic cache key for /assistant/query responses."""
     canonical = {k: v for k, v in sorted(params.items()) if v is not None}
     blob = json.dumps({"type": "assistant", "params": canonical}, sort_keys=True)
     digest = sha256(blob.encode("utf-8")).hexdigest()

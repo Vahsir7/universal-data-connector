@@ -1,3 +1,9 @@
+"""API-key lifecycle service - create, list, revoke, and validate keys.
+
+Keys are SHA-256 hashed before storage.  On startup, any keys listed in
+the DEFAULT_CLIENT_API_KEYS env var are auto-imported into SQLite.
+"""
+
 import hashlib
 import secrets
 import uuid
@@ -11,6 +17,7 @@ from app.services.db import get_db_service
 
 
 class ApiKeyService:
+    """CRUD and validation logic for client API keys (SQLite-backed)."""
     def __init__(self) -> None:
         self._db = get_db_service()
         self._bootstrap_env_keys()
@@ -130,7 +137,12 @@ class ApiKeyService:
 api_key_service = ApiKeyService()
 
 
+# ---------------------------------------------------------------------------
+# FastAPI dependencies – inject into routes via Depends()
+# ---------------------------------------------------------------------------
+
 def require_api_key(x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")) -> None:
+    """Dependency: reject requests when AUTH_ENABLED and the key is invalid."""
     if not settings.AUTH_ENABLED:
         return
     if x_api_key is None or not api_key_service.validate_api_key(x_api_key):
@@ -144,6 +156,7 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None, alias="X-API
 
 
 def require_admin_key(x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key")) -> None:
+    """Dependency: require the static ADMIN_API_KEY for admin-only routes."""
     admin_secret = settings.ADMIN_API_KEY.get_secret_value() if settings.ADMIN_API_KEY else ""
     if x_admin_key is None or x_admin_key != admin_secret:
         raise HTTPException(

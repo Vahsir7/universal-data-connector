@@ -1,3 +1,12 @@
+"""Webhook router — receive real-time update notifications from external systems.
+
+When a data source changes, the external system POSTs to /webhooks/events.
+If the event references a known source (crm/support/analytics), relevant
+cache entries are invalidated so subsequent requests fetch fresh data.
+
+Optionally protected by a shared secret in the X-Webhook-Secret header.
+"""
+
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -46,6 +55,7 @@ def ingest_webhook_event(
 ) -> WebhookEventResponse:
     _verify_webhook_secret(x_webhook_secret)
 
+    # If the event names a known data source, bust the cache for that prefix
     source = (payload.source or "").strip().lower()
     invalidated = 0
     if source in {"crm", "support", "analytics"}:

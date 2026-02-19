@@ -1,3 +1,10 @@
+"""SQLite database singleton with thread-safe access.
+
+Creates the data directory and schema on first use.  All tables
+(api_keys, webhook_events, llm_provider_keys) are initialised
+automatically via CREATE TABLE IF NOT EXISTS.
+"""
+
 import sqlite3
 import threading
 from pathlib import Path
@@ -7,6 +14,7 @@ from app.config import settings
 
 
 class DbService:
+    """Lightweight SQLite wrapper with per-call connections and a global lock."""
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._db_path = Path(settings.APP_DB_PATH)

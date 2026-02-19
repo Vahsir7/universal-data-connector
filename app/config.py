@@ -1,35 +1,48 @@
+"""Centralised application settings loaded from environment / .env file.
+
+Every setting has a sensible default so the app can start with zero
+configuration; override via environment variables in production.
+"""
+
 from typing import Optional
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    # ---- Core ----
     APP_NAME: str = "Universal Data Connector"
     MAX_RESULTS: int = 10
     DEFAULT_PAGE_SIZE: int = 10
     MAX_PAGE_SIZE: int = 50
     VOICE_SUMMARY_THRESHOLD: int = 10
 
+    # ---- Redis cache ----
     ENABLE_REDIS_CACHE: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_TTL_SECONDS: int = 60
 
+    # ---- Rate limiting ----
     RATE_LIMIT_PER_SOURCE: int = 60
     RATE_LIMIT_WINDOW_SECONDS: int = 60
 
+    # ---- NDJSON streaming ----
     ENABLE_STREAMING: bool = True
     STREAM_MIN_TOTAL_RESULTS: int = 25
     STREAM_CHUNK_SIZE: int = 10
 
+    # ---- Auth / API keys ----
     AUTH_ENABLED: bool = False
     ADMIN_API_KEY: Optional[SecretStr] = SecretStr("dev-admin-key")
     API_KEYS_STORE_FILE: str = "data/api_keys.json"
     APP_DB_PATH: str = "data/app.db"
     DEFAULT_CLIENT_API_KEYS: str = ""
 
+    # ---- Webhooks ----
     WEBHOOK_SHARED_SECRET: Optional[SecretStr] = None
     WEBHOOK_MAX_EVENTS: int = 200
 
+    # ---- LLM provider keys & models ----
     OPENAI_API_KEY: Optional[SecretStr] = None
     ANTHROPIC_API_KEY: Optional[SecretStr] = None
     GEMINI_API_KEY: Optional[SecretStr] = None

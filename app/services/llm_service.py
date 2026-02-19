@@ -1,3 +1,17 @@
+"""LLM assistant service orchestrates tool-calling across OpenAI, Anthropic & Gemini.
+
+Flow inside run_assistant_query():
+  1. Check cache for identical prior response.
+  2. Try regex-based *fallback* detectors (ticket id, customer id, active-user
+     count, daily-users-by-date) that can answer WITHOUT calling an LLM.
+  3. If no fallback matched, resolve the provider API key and delegate to the
+     provider-specific runner (_run_openai / _run_anthropic / _run_gemini).
+  4. Each runner sends the user query + tool schema to the LLM, executes any
+     tool calls the LLM emits, then returns the final answer.
+  5. If the LLM did NOT emit a tool call, _recover_tool_call_from_text_response
+     tries to parse 'fetch_data(...)' from its raw text as a last resort.
+"""
+
 import json
 import importlib
 import re
@@ -92,19 +106,29 @@ def _tool_schema_anthropic() -> List[Dict[str, Any]]:
 
 
 def _normalize_tool_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Sanitise and enrich the raw arguments the LLM passes to fetch_data.
+
+    LLMs sometimes omit 'source', use 'data_source' instead, or embed
+    filter values inside a free-text 'query' field. This function applies
+    heuristics (regex + keyword matching) to fill in missing fields so the
+    downstream data pipeline receives well-formed arguments.
+    """
     normalized = dict(arguments)
 
+    # Some models return 'data_source' instead of 'source'
     if not normalized.get("source") and normalized.get("data_source"):
         normalized["source"] = normalized["data_source"]
 
     free_text_query = str(normalized.get("query", "")).lower()
 
+    # Detect "active users / customers" intent from free-text query
     if "active users" in free_text_query or "active customers" in free_text_query:
         normalized["source"] = "crm"
         normalized.setdefault("status", "active")
         normalized.setdefault("page", 1)
         normalized.setdefault("page_size", 1)
 
+    # Detect daily-active-users + specific ISO date in query text
     date_in_query = _extract_iso_date(free_text_query)
     if date_in_query and any(token in free_text_query for token in ["daily users", "daily active users", "dau"]):
         normalized["source"] = "analytics"
@@ -114,6 +138,7 @@ def _normalize_tool_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
         normalized.setdefault("page", 1)
         normalized.setdefault("page_size", 1)
 
+    # Extract ticket ID from patterns like "ticket #42" or "ticket 42"
     if not normalized.get("ticket_id"):
         ticket_match = re.search(r"\bticket\s*#?\s*(\d+)\b", free_text_query, flags=re.IGNORECASE)
         if ticket_match:
@@ -122,6 +147,7 @@ def _normalize_tool_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
             normalized.setdefault("page", 1)
             normalized.setdefault("page_size", 1)
 
+    # Extract customer ID from patterns like "customer #5" or "customer 5"
     if not normalized.get("customer_id"):
         customer_match = re.search(r"\bcustomer\s*#?\s*(\d+)\b", free_text_query, flags=re.IGNORECASE)
         if customer_match:
@@ -137,6 +163,7 @@ def _normalize_tool_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _execute_fetch_data(arguments: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Normalize args, call the data pipeline, and return (args, result) tuple."""
     parsed_args = ToolFetchDataArgs.model_validate(_normalize_tool_arguments(arguments))
     source = DataSource(parsed_args.source)
 
@@ -167,6 +194,7 @@ def _build_usage_dict(usage: Any) -> Dict[str, Any]:
 
 
 def _detect_ticket_id_query(user_query: str) -> int | None:
+    """Return ticket ID if the raw user query mentions one, else None."""
     match = re.search(r"\bticket\s*#?\s*(\d+)\b", user_query, flags=re.IGNORECASE)
     if not match:
         return None
@@ -174,6 +202,7 @@ def _detect_ticket_id_query(user_query: str) -> int | None:
 
 
 def _detect_customer_id_query(user_query: str) -> int | None:
+    """Return customer ID if the raw user query mentions one, else None."""
     match = re.search(r"\bcustomer\s*#?\s*(\d+)\b", user_query, flags=re.IGNORECASE)
     if not match:
         return None
@@ -181,6 +210,7 @@ def _detect_customer_id_query(user_query: str) -> int | None:
 
 
 def _extract_iso_date(user_query: str) -> str | None:
+    """Extract the first YYYY-MM-DD date found in the text."""
     match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", user_query)
     if not match:
         return None
@@ -188,6 +218,7 @@ def _extract_iso_date(user_query: str) -> str | None:
 
 
 def _is_total_active_users_query(user_query: str) -> bool:
+    """True when the user asks for a count/total of active users/customers."""
     text = user_query.lower()
     has_total = any(token in text for token in ["total", "count", "how many"])
     has_active = any(token in text for token in ["active user", "active users", "active customer", "active customers"])
@@ -195,6 +226,7 @@ def _is_total_active_users_query(user_query: str) -> bool:
 
 
 def _detect_daily_users_date_query(user_query: str) -> str | None:
+    """Return ISO date if the user asks about daily users for a specific day."""
     text = user_query.lower()
     if not any(token in text for token in ["daily users", "daily active users", "dau"]):
         return None
@@ -211,7 +243,12 @@ def _default_model_for_provider(provider: LLMProvider) -> str:
     return "unknown"
 
 
+# ---------------------------------------------------------------------------
+# Fallback handlers – answer common queries WITHOUT calling an LLM
+# ---------------------------------------------------------------------------
+
 def _run_ticket_lookup_fallback(request: AssistantQueryRequest, ticket_id: int) -> AssistantQueryResponse:
+    """Directly fetch a ticket by ID and synthesise a canned answer."""
     result: DataResponse = get_unified_data(
         source=DataSource.support,
         ticket_id=ticket_id,
@@ -246,6 +283,7 @@ def _run_ticket_lookup_fallback(request: AssistantQueryRequest, ticket_id: int) 
 
 
 def _run_customer_lookup_fallback(request: AssistantQueryRequest, customer_id: int) -> AssistantQueryResponse:
+    """Directly fetch a customer by ID and synthesise a canned answer."""
     result: DataResponse = get_unified_data(
         source=DataSource.crm,
         customer_id=customer_id,
@@ -280,6 +318,7 @@ def _run_customer_lookup_fallback(request: AssistantQueryRequest, customer_id: i
 
 
 def _run_total_active_users_fallback(request: AssistantQueryRequest) -> AssistantQueryResponse:
+    """Fetch active + total customer counts and build a summary."""
     active_result = get_unified_data(
         source=DataSource.crm,
         status="active",
@@ -312,6 +351,7 @@ def _run_total_active_users_fallback(request: AssistantQueryRequest) -> Assistan
 
 
 def _run_daily_users_for_date_fallback(request: AssistantQueryRequest, target_date: str) -> AssistantQueryResponse:
+    """Fetch daily_active_users metric for a single date and summarise."""
     result = get_unified_data(
         source=DataSource.analytics,
         metric="daily_active_users",
@@ -352,6 +392,7 @@ def _run_daily_users_for_date_fallback(request: AssistantQueryRequest, target_da
 
 
 def _build_final_answer_from_tool_result(normalized_args: Dict[str, Any], result_payload: Dict[str, Any]) -> str:
+    """Construct a plain-English summary from tool results after recovery."""
     meta = result_payload.get("metadata", {})
     data = result_payload.get("data", [])
 
@@ -373,6 +414,7 @@ def _build_final_answer_from_tool_result(normalized_args: Dict[str, Any], result
 
 
 def _extract_tool_args_from_text(answer: str) -> Dict[str, Any] | None:
+    """Try to parse fetch_data(key=val, ...) from the LLM’s raw text output."""
     match = re.search(r"fetch_data\((.*?)\)", answer, flags=re.IGNORECASE | re.DOTALL)
     if not match:
         return None
@@ -397,6 +439,8 @@ def _recover_tool_call_from_text_response(
     answer: str,
     usage: Dict[str, Any],
 ) -> AssistantQueryResponse | None:
+    """Last-resort recovery: if the LLM wrote 'fetch_data(...)' as text
+    instead of emitting a proper tool call, parse and execute it."""
     parsed_args = _extract_tool_args_from_text(answer)
     if not parsed_args:
         return None
@@ -419,7 +463,14 @@ def _recover_tool_call_from_text_response(
     )
 
 
+# ---------------------------------------------------------------------------
+# Provider runners – each follows the same two-turn pattern:
+#   Turn 1: send user query + tool schema → get tool calls (or text)
+#   Turn 2: feed tool results back → get final answer
+# ---------------------------------------------------------------------------
+
 def _run_openai(request: AssistantQueryRequest, api_key: str) -> AssistantQueryResponse:
+    """Two-turn OpenAI chat completion with function-calling."""
     if not api_key:
         raise ValueError("OPENAI_API_KEY is not configured")
 
@@ -516,6 +567,7 @@ def _run_openai(request: AssistantQueryRequest, api_key: str) -> AssistantQueryR
 
 
 def _run_gemini(request: AssistantQueryRequest, api_key: str) -> AssistantQueryResponse:
+    """Gemini runner – uses OpenAI-compatible SDK via Google’s bridge URL."""
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not configured")
 
@@ -632,6 +684,7 @@ def _extract_text_from_blocks(blocks: List[Any]) -> str:
 
 
 def _run_anthropic(request: AssistantQueryRequest, api_key: str) -> AssistantQueryResponse:
+    """Anthropic runner – uses native Messages API (different from OpenAI SDK)."""
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY is not configured ")
 
@@ -717,6 +770,7 @@ def _run_anthropic(request: AssistantQueryRequest, api_key: str) -> AssistantQue
 
 
 def run_assistant_query(request: AssistantQueryRequest) -> AssistantQueryResponse:
+    """Main entry point – check cache, try fallbacks, then call LLM provider."""
     cache_key = build_assistant_cache_key(
         {
             "provider": request.provider.value,
