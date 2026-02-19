@@ -17,6 +17,12 @@ class LLMProvider(str, Enum):
     gemini = "gemini"
 
 
+class AssistantResponseFormat(str, Enum):
+    """Supported output formats for assistant query responses."""
+    raw = "raw"
+    pretty = "pretty"
+
+
 class ToolFetchDataArgs(BaseModel):
     """Arguments the LLM passes when calling the fetch_data tool."""
 
@@ -47,6 +53,7 @@ class AssistantQueryRequest(BaseModel):
     temperature: float = Field(default=0.2, ge=0.0, le=1.0)
     api_key_id: Optional[str] = Field(default=None, description="Stored provider API key identifier")
     api_key: Optional[str] = Field(default=None, description="Manual provider API key for this request")
+    response_format: AssistantResponseFormat = Field(default=AssistantResponseFormat.raw)
 
 
 class AssistantToolCall(BaseModel):
@@ -69,3 +76,31 @@ class AssistantQueryResponse(BaseModel):
     answer: str
     tool_calls: List[AssistantToolCall] = Field(default_factory=list)
     usage: Optional[Dict[str, Any]] = None
+
+
+class AssistantPrettySummary(BaseModel):
+    """Compact summary for pretty-format assistant responses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_results: int = 0
+    returned_results: int = 0
+    page: int = 1
+    total_pages: int = 1
+    has_next: bool = False
+    data_type: Optional[str] = None
+    filters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AssistantPrettyResponse(BaseModel):
+    """Human-friendly response format for /assistant/query."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: LLMProvider
+    model: str
+    answer: str
+    summary: AssistantPrettySummary
+    usage: Dict[str, Any] = Field(default_factory=dict)
+    top_records: List[Dict[str, Any]] = Field(default_factory=list)
+    debug: Optional[Dict[str, Any]] = None

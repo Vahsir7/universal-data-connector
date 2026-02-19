@@ -9,15 +9,20 @@ revoke provider API keys so they don't have to pass them every request.
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.assistant import AssistantQueryRequest, AssistantQueryResponse, LLMProvider
+from app.models.assistant import (
+    AssistantPrettyResponse,
+    AssistantQueryRequest,
+    AssistantQueryResponse,
+    LLMProvider,
+)
 from app.models.common import ErrorResponse
 from app.services.auth import require_api_key
-from app.services.llm_service import run_assistant_query
+from app.services.llm_service import format_assistant_response, run_assistant_query
 from app.services.llm_api_keys import llm_api_key_service
 
 
@@ -62,7 +67,7 @@ class LlmApiKeyCreateResponse(BaseModel):
 
 @router.post(
     "/query",
-    response_model=AssistantQueryResponse,
+    response_model=Union[AssistantQueryResponse, AssistantPrettyResponse],
     responses={
         400: {"model": ErrorResponse, "description": "Provider/API key/configuration error"},
         422: {"model": ErrorResponse, "description": "Validation error"},
@@ -74,9 +79,10 @@ class LlmApiKeyCreateResponse(BaseModel):
 def assistant_query(
     payload: AssistantQueryRequest,
     _auth: None = Depends(require_api_key),
-) -> AssistantQueryResponse:
+) -> Union[AssistantQueryResponse, AssistantPrettyResponse]:
     try:
-        return run_assistant_query(payload)
+        response = run_assistant_query(payload)
+        return format_assistant_response(response, payload.response_format)
     except ValueError as exc:
         raise HTTPException(
             status_code=400,

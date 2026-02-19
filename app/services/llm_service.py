@@ -19,8 +19,11 @@ from typing import Any, Dict, List, Tuple
 
 from app.config import settings
 from app.models.assistant import (
+    AssistantPrettyResponse,
+    AssistantPrettySummary,
     AssistantQueryRequest,
     AssistantQueryResponse,
+    AssistantResponseFormat,
     AssistantToolCall,
     LLMProvider,
     ToolFetchDataArgs,
@@ -115,9 +118,53 @@ def _normalize_tool_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
     """
     normalized = dict(arguments)
 
+    allowed_keys = {
+        "source",
+        "data_source",
+        "data_type",
+        "query",
+        "ticket_id",
+        "customer_id",
+        "page",
+        "page_size",
+        "status",
+        "priority",
+        "metric",
+        "start_date",
+        "end_date",
+    }
+    normalized = {key: value for key, value in normalized.items() if key in allowed_keys}
+
     # Some models return 'data_source' instead of 'source'
     if not normalized.get("source") and normalized.get("data_source"):
         normalized["source"] = normalized["data_source"]
+
+    # Some models return 'data_type' instead of 'source'/'data_source'
+    if not normalized.get("source") and normalized.get("data_type"):
+        normalized["source"] = normalized["data_type"]
+
+    # Alias keys are internal normalization hints; remove before schema validation
+    normalized.pop("data_source", None)
+    normalized.pop("data_type", None)
+
+    # Normalize source value to DataSource enum-compatible lowercase labels
+    source_value = normalized.get("source")
+    if source_value is not None:
+        source_text = str(source_value).strip().lower()
+        source_aliases = {
+            "crm": "crm",
+            "customer": "crm",
+            "customers": "crm",
+            "support": "support",
+            "support_ticket": "support",
+            "support_tickets": "support",
+            "ticket": "support",
+            "tickets": "support",
+            "analytics": "analytics",
+            "metric": "analytics",
+            "metrics": "analytics",
+        }
+        normalized["source"] = source_aliases.get(source_text, source_text)
 
     free_text_query = str(normalized.get("query", "")).lower()
 
@@ -192,23 +239,6 @@ def _build_usage_dict(usage: Any) -> Dict[str, Any]:
         return usage
     return {}
 
-
-def _detect_ticket_id_query(user_query: str) -> int | None:
-    """Return ticket ID if the raw user query mentions one, else None."""
-    match = re.search(r"\bticket\s*#?\s*(\d+)\b", user_query, flags=re.IGNORECASE)
-    if not match:
-        return None
-    return int(match.group(1))
-
-
-def _detect_customer_id_query(user_query: str) -> int | None:
-    """Return customer ID if the raw user query mentions one, else None."""
-    match = re.search(r"\bcustomer\s*#?\s*(\d+)\b", user_query, flags=re.IGNORECASE)
-    if not match:
-        return None
-    return int(match.group(1))
-
-
 def _extract_iso_date(user_query: str) -> str | None:
     """Extract the first YYYY-MM-DD date found in the text."""
     match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", user_query)
@@ -217,178 +247,9 @@ def _extract_iso_date(user_query: str) -> str | None:
     return match.group(1)
 
 
-def _is_total_active_users_query(user_query: str) -> bool:
-    """True when the user asks for a count/total of active users/customers."""
-    text = user_query.lower()
-    has_total = any(token in text for token in ["total", "count", "how many"])
-    has_active = any(token in text for token in ["active user", "active users", "active customer", "active customers"])
-    return has_total and has_active
-
-
-def _detect_daily_users_date_query(user_query: str) -> str | None:
-    """Return ISO date if the user asks about daily users for a specific day."""
-    text = user_query.lower()
-    if not any(token in text for token in ["daily users", "daily active users", "dau"]):
-        return None
-    return _extract_iso_date(text)
-
-
-def _default_model_for_provider(provider: LLMProvider) -> str:
-    if provider == LLMProvider.openai:
-        return settings.OPENAI_MODEL
-    if provider == LLMProvider.anthropic:
-        return settings.ANTHROPIC_MODEL
-    if provider == LLMProvider.gemini:
-        return settings.GEMINI_MODEL
-    return "unknown"
-
-
 # ---------------------------------------------------------------------------
 # Fallback handlers – answer common queries WITHOUT calling an LLM
 # ---------------------------------------------------------------------------
-
-def _run_ticket_lookup_fallback(request: AssistantQueryRequest, ticket_id: int) -> AssistantQueryResponse:
-    """Directly fetch a ticket by ID and synthesise a canned answer."""
-    result: DataResponse = get_unified_data(
-        source=DataSource.support,
-        ticket_id=ticket_id,
-        page=1,
-        page_size=1,
-    )
-
-    model_name = request.model or _default_model_for_provider(request.provider)
-
-    if result.data:
-        ticket = result.data[0]
-        answer = (
-            f"Ticket {ticket_id} is {ticket.get('status', 'unknown')} with "
-            f"{ticket.get('priority', 'unknown')} priority, created at {ticket.get('created_at', 'unknown')}."
-        )
-    else:
-        answer = f"Ticket {ticket_id} was not found in support data."
-
-    return AssistantQueryResponse(
-        provider=request.provider,
-        model=model_name,
-        answer=answer,
-        tool_calls=[
-            AssistantToolCall(
-                tool_name="fetch_data",
-                arguments={"source": "support", "ticket_id": ticket_id, "page": 1, "page_size": 1},
-                result=result.model_dump(),
-            )
-        ],
-        usage={},
-    )
-
-
-def _run_customer_lookup_fallback(request: AssistantQueryRequest, customer_id: int) -> AssistantQueryResponse:
-    """Directly fetch a customer by ID and synthesise a canned answer."""
-    result: DataResponse = get_unified_data(
-        source=DataSource.crm,
-        customer_id=customer_id,
-        page=1,
-        page_size=1,
-    )
-
-    model_name = request.model or _default_model_for_provider(request.provider)
-
-    if result.data:
-        customer = result.data[0]
-        answer = (
-            f"Customer {customer_id} is {customer.get('name', 'unknown')} "
-            f"({customer.get('email', 'unknown')}) with status {customer.get('status', 'unknown')}."
-        )
-    else:
-        answer = f"Customer {customer_id} was not found in CRM data."
-
-    return AssistantQueryResponse(
-        provider=request.provider,
-        model=model_name,
-        answer=answer,
-        tool_calls=[
-            AssistantToolCall(
-                tool_name="fetch_data",
-                arguments={"source": "crm", "customer_id": customer_id, "page": 1, "page_size": 1},
-                result=result.model_dump(),
-            )
-        ],
-        usage={},
-    )
-
-
-def _run_total_active_users_fallback(request: AssistantQueryRequest) -> AssistantQueryResponse:
-    """Fetch active + total customer counts and build a summary."""
-    active_result = get_unified_data(
-        source=DataSource.crm,
-        status="active",
-        page=1,
-        page_size=1,
-    )
-    total_result = get_unified_data(
-        source=DataSource.crm,
-        page=1,
-        page_size=1,
-    )
-
-    active_count = active_result.metadata.total_results
-    total_count = total_result.metadata.total_results
-    model_name = request.model or _default_model_for_provider(request.provider)
-
-    return AssistantQueryResponse(
-        provider=request.provider,
-        model=model_name,
-        answer=f"Total active users: {active_count} out of {total_count} customers.",
-        tool_calls=[
-            AssistantToolCall(
-                tool_name="fetch_data",
-                arguments={"source": "crm", "status": "active", "page": 1, "page_size": 1},
-                result=active_result.model_dump(),
-            )
-        ],
-        usage={},
-    )
-
-
-def _run_daily_users_for_date_fallback(request: AssistantQueryRequest, target_date: str) -> AssistantQueryResponse:
-    """Fetch daily_active_users metric for a single date and summarise."""
-    result = get_unified_data(
-        source=DataSource.analytics,
-        metric="daily_active_users",
-        start_date=target_date,
-        end_date=target_date,
-        page=1,
-        page_size=1,
-    )
-
-    model_name = request.model or _default_model_for_provider(request.provider)
-
-    if result.data:
-        day_value = result.data[0].get("value", "unknown")
-        answer = f"Total daily users on {target_date}: {day_value}."
-    else:
-        answer = f"No daily_active_users data found for {target_date}."
-
-    return AssistantQueryResponse(
-        provider=request.provider,
-        model=model_name,
-        answer=answer,
-        tool_calls=[
-            AssistantToolCall(
-                tool_name="fetch_data",
-                arguments={
-                    "source": "analytics",
-                    "metric": "daily_active_users",
-                    "start_date": target_date,
-                    "end_date": target_date,
-                    "page": 1,
-                    "page_size": 1,
-                },
-                result=result.model_dump(),
-            )
-        ],
-        usage={},
-    )
 
 
 def _build_final_answer_from_tool_result(normalized_args: Dict[str, Any], result_payload: Dict[str, Any]) -> str:
@@ -420,7 +281,7 @@ def _extract_tool_args_from_text(answer: str) -> Dict[str, Any] | None:
         return None
 
     raw_args = match.group(1)
-    items = re.findall(r"(\w+)\s*=\s*(\".*?\"|'.*?'|\d+)", raw_args)
+    items = re.findall(r"(\w+)\s*=\s*(\"[^\"]*\"|'[^']*'|\d+)", raw_args)
     if not items:
         return None
 
@@ -519,6 +380,8 @@ def _run_openai(request: AssistantQueryRequest, api_key: str) -> AssistantQueryR
                 continue
 
             tool_args = json.loads(call.function.arguments or "{}")
+            if not str(tool_args.get("query", "")).strip():
+                tool_args["query"] = request.user_query
             parsed_args, result_payload = _execute_fetch_data(tool_args)
 
             captured_calls.append(
@@ -567,7 +430,7 @@ def _run_openai(request: AssistantQueryRequest, api_key: str) -> AssistantQueryR
 
 
 def _run_gemini(request: AssistantQueryRequest, api_key: str) -> AssistantQueryResponse:
-    """Gemini runner – uses OpenAI-compatible SDK via Google’s bridge URL."""
+    """Gemini runner - uses OpenAI-compatible SDK via Google's bridge URL."""
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not configured")
 
@@ -619,6 +482,8 @@ def _run_gemini(request: AssistantQueryRequest, api_key: str) -> AssistantQueryR
                 continue
 
             tool_args = json.loads(call.function.arguments or "{}")
+            if not str(tool_args.get("query", "")).strip():
+                tool_args["query"] = request.user_query
             parsed_args, result_payload = _execute_fetch_data(tool_args)
 
             captured_calls.append(
@@ -730,7 +595,11 @@ def _run_anthropic(request: AssistantQueryRequest, api_key: str) -> AssistantQue
         if block.name != "fetch_data":
             continue
 
-        parsed_args, result_payload = _execute_fetch_data(block.input)
+        tool_args = dict(block.input or {})
+        if not str(tool_args.get("query", "")).strip():
+            tool_args["query"] = request.user_query
+
+        parsed_args, result_payload = _execute_fetch_data(tool_args)
         captured_calls.append(
             AssistantToolCall(
                 tool_name="fetch_data",
@@ -770,9 +639,10 @@ def _run_anthropic(request: AssistantQueryRequest, api_key: str) -> AssistantQue
 
 
 def run_assistant_query(request: AssistantQueryRequest) -> AssistantQueryResponse:
-    """Main entry point – check cache, try fallbacks, then call LLM provider."""
+    """Main entry point - check cache, then always call the selected LLM provider."""
     cache_key = build_assistant_cache_key(
         {
+            "routing_mode": "llm_only_v1",
             "provider": request.provider.value,
             "query": request.user_query,
             "model": request.model,
@@ -784,29 +654,6 @@ def run_assistant_query(request: AssistantQueryRequest) -> AssistantQueryRespons
     cached = cache_service.get(cache_key)
     if cached is not None:
         return AssistantQueryResponse.model_validate(cached)
-
-    daily_users_date = _detect_daily_users_date_query(request.user_query)
-    if daily_users_date is not None:
-        response = _run_daily_users_for_date_fallback(request, daily_users_date)
-        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
-        return response
-
-    if _is_total_active_users_query(request.user_query):
-        response = _run_total_active_users_fallback(request)
-        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
-        return response
-
-    ticket_id = _detect_ticket_id_query(request.user_query)
-    if ticket_id is not None:
-        response = _run_ticket_lookup_fallback(request, ticket_id)
-        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
-        return response
-
-    customer_id = _detect_customer_id_query(request.user_query)
-    if customer_id is not None:
-        response = _run_customer_lookup_fallback(request, customer_id)
-        cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
-        return response
 
     resolved_api_key = llm_api_key_service.resolve_key(
         provider=request.provider,
@@ -827,3 +674,45 @@ def run_assistant_query(request: AssistantQueryRequest) -> AssistantQueryRespons
         cache_service.set(cache_key, response.model_dump(), settings.CACHE_TTL_SECONDS)
         return response
     raise ValueError(f"Unsupported provider: {request.provider}")
+
+
+def format_assistant_response(
+    response: AssistantQueryResponse,
+    response_format: AssistantResponseFormat,
+    top_records_limit: int = 5,
+) -> AssistantQueryResponse | AssistantPrettyResponse:
+    """Return raw response unchanged or transform it into a compact pretty schema."""
+    if response_format == AssistantResponseFormat.raw:
+        return response
+
+    first_call = response.tool_calls[0] if response.tool_calls else None
+    first_args = dict(first_call.arguments) if first_call else {}
+    first_result = dict(first_call.result) if first_call else {}
+    metadata = first_result.get("metadata") or {}
+    records = first_result.get("data") or []
+
+    filters = {
+        key: value
+        for key, value in first_args.items()
+        if key in {"source", "status", "priority", "metric", "start_date", "end_date", "ticket_id", "customer_id"}
+    }
+
+    summary = AssistantPrettySummary(
+        total_results=int(metadata.get("total_results", len(records) or 0)),
+        returned_results=int(metadata.get("returned_results", len(records) or 0)),
+        page=int(metadata.get("page", 1) or 1),
+        total_pages=int(metadata.get("total_pages", 1) or 1),
+        has_next=bool(metadata.get("has_next", False)),
+        data_type=metadata.get("data_type"),
+        filters=filters,
+    )
+
+    return AssistantPrettyResponse(
+        provider=response.provider,
+        model=response.model,
+        answer=response.answer.strip(),
+        summary=summary,
+        usage=response.usage or {},
+        top_records=list(records)[:max(1, top_records_limit)],
+        debug={"tool_calls": [call.model_dump() for call in response.tool_calls]},
+    )

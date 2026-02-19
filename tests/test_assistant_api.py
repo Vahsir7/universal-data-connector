@@ -128,6 +128,18 @@ def test_recover_tool_call_from_text_response_executes_fetch_data():
     assert "Total active users:" in response.answer
 
 
+def test_recover_tool_call_from_text_response_normalizes_uppercase_source():
+    response = _recover_tool_call_from_text_response(
+        provider=LLMProvider.gemini,
+        model_name="gemini-2.0-flash",
+        answer='```tool_code\nfetch_data(source="CRM", query="active customers")\n```',
+        usage={"total_tokens": 1},
+    )
+
+    assert response is not None
+    assert response.tool_calls[0].arguments["source"] == "crm"
+
+
 def test_assistant_daily_users_for_date_uses_deterministic_fallback():
     response = client.post(
         "/assistant/query",

@@ -22,10 +22,18 @@
     .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .status { font-size: 12px; font-weight: 600; margin-top: 8px; }
     .ok { color: #047857; } .warn { color: #b45309; } .err { color: #b91c1c; }
+    .pretty { background: #f9fafb; color: #111827; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+    .pretty h4 { margin: 0 0 8px; font-size: 14px; }
+    .answer { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 10px; white-space: pre-wrap; }
+    .meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+    .meta div { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; font-size: 12px; }
+    .tool { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+    .tool b { display: inline-block; margin-bottom: 6px; font-size: 12px; }
     pre { background: #f9fafb; color: #111827; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; max-height: 380px; overflow: auto; }
     @media (max-width: 900px) {
       .content { padding: 16px; }
       .row2 { grid-template-columns: 1fr; }
+      .meta { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -62,7 +70,9 @@
   </section>
 
   <section class="card">
-    <h3 style="margin-top:0;">Response Log</h3>
+    <h3 style="margin-top:0;">Formatted Response</h3>
+    <div id="pretty" class="pretty">No response yet.</div>
+    <h3>Raw Response Log</h3>
     <pre id="log">Ready</pre>
   </section>
   </main>
@@ -70,6 +80,7 @@
 
 <script>
 const logEl = document.getElementById('log');
+const prettyEl = document.getElementById('pretty');
 let lastAssistantResponse = null;
 let keyRecords = [];
 
@@ -81,6 +92,64 @@ function setStatus(id, text, mode='ok') {
 
 function log(data){
   logEl.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+}
+
+function escapeHtml(text){
+  return String(text ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function renderPrettyResponse(data, isOk){
+  if (!data || typeof data !== 'object') {
+    prettyEl.textContent = 'No response yet.';
+    return;
+  }
+
+  if (!isOk) {
+    const message = data?.error?.message || 'Request failed';
+    const code = data?.error?.code || 'UNKNOWN_ERROR';
+    prettyEl.innerHTML = `
+      <h4>Error</h4>
+      <div class="answer"><b>${escapeHtml(code)}</b>\n${escapeHtml(message)}</div>
+    `;
+    return;
+  }
+
+  const provider = data.provider || '-';
+  const model = data.model || '-';
+  const totalTokens = data?.usage?.total_tokens ?? '-';
+  const answer = data.answer || '(empty answer)';
+  const toolCalls = Array.isArray(data.tool_calls) ? data.tool_calls : [];
+
+  const toolHtml = toolCalls.length
+    ? toolCalls.map((tool, index) => {
+        const args = JSON.stringify(tool.arguments || {}, null, 2);
+        const resultMeta = tool?.result?.metadata || {};
+        return `
+          <div class="tool">
+            <b>Tool ${index + 1}: ${escapeHtml(tool.tool_name || 'unknown')}</b>
+            <div style="font-size:12px; margin-bottom:6px;">Returned: ${escapeHtml(resultMeta.returned_results ?? '-')} / Total: ${escapeHtml(resultMeta.total_results ?? '-')}</div>
+            <pre>${escapeHtml(args)}</pre>
+          </div>
+        `;
+      }).join('')
+    : '<div class="tool"><b>No tool calls recorded</b></div>';
+
+  prettyEl.innerHTML = `
+    <h4>Answer</h4>
+    <div class="answer">${escapeHtml(answer)}</div>
+    <div class="meta">
+      <div><b>Provider</b><br>${escapeHtml(provider)}</div>
+      <div><b>Model</b><br>${escapeHtml(model)}</div>
+      <div><b>Total Tokens</b><br>${escapeHtml(totalTokens)}</div>
+    </div>
+    <h4>Tool Calls</h4>
+    ${toolHtml}
+  `;
 }
 
 function selectedKeyMeta(){
@@ -139,6 +208,7 @@ async function runAssistant(){
   });
   const data = await res.json();
   lastAssistantResponse = data;
+  renderPrettyResponse(data, res.ok);
   log(data);
   setStatus('assistantStatus', res.ok ? 'Success' : `Error ${res.status}`, res.ok ? 'ok' : 'err');
 }
